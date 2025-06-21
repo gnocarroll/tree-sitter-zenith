@@ -1,0 +1,40 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "zenith",
+      "camelcase": "Zenith",
+      "title": "Zenith",
+      "scope": "source.zenith",
+      "file-types": [
+        "zen",
+        "zenith"
+      ],
+      "injection-regex": "^zenith$",
+      "class-name": "TreeSitterZenith"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "parser for zenith language",
+    "authors": [
+      {
+        "name": "George O'Carroll",
+        "email": "gocarrol@purdue.edu"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/gnocarroll/tree-sitter-zenith/"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true,
+    "zig": false
+  }
+}
