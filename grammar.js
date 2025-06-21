@@ -12,6 +12,9 @@ module.exports = grammar({
 
   rules: {
     // TODO: add the actual grammar rules
-    source_file: $ => "hello"
+    source_file: $ => "hello",
+
+    identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
+    digits: $ => /\d+/,
   }
 });
