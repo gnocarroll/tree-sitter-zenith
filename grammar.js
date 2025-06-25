@@ -7,13 +7,16 @@
 /// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
 
-const LINE_SEP = "\n";
-
 const B_EXPR = ($, prec_no, operator) => prec.left(prec_no, seq(
-  field("lhs", $.expr),
+  field("lhs", $._expr),
   field("op", operator),
-  field("rhs", $.expr),
+  field("rhs", $._expr),
 ));
+
+
+// only insert newline where you want to enforce its presence,
+// otherwise tree-sitter will disregard any whitespace
+const NEWLINE = () => "\n";
 
 module.exports = grammar({
   name: "zenith",
@@ -26,12 +29,33 @@ module.exports = grammar({
 
     _definition: $ => choice(
       $.function_definition,
+      $._type_definition,
+    ),
+
+    _type_definition: $ => choice(
+      $.number_definition,
+    ),
+
+    number_definition: $ => seq(
+      choice(
+        "signed",
+        "unsigned",
+        "float",
+      ),
+      field("name", $.identifier),
+      NEWLINE(),
+
+      field("definitions", repeat($._definition)),
+      
+      "end",
+      field("endName", $.identifier),
+      NEWLINE(),
     ),
 
     function_definition: $ => seq(
       "function",
       field("name", $.identifier),
-      field("parameters", $.parameter_list),
+      field("params", $.function_definition_parameters),
       optional(seq( // return type (can give var name)
         "=>",
         field("returnSpec", choice(
@@ -39,40 +63,29 @@ module.exports = grammar({
           $.pattern_and_type,
         )),
       )),
-      LINE_SEP,
-      repeat(seq($._statement, LINE_SEP)),
+      NEWLINE(),
+      
+      repeat($._statement),
+      
       "end",
       field("endName", $.identifier),
+      NEWLINE(),
     ),
 
-    parameter_list: $ => seq(
+    function_definition_parameters: $ => seq(
       "(",
-      $.optional_newlines,
-        // zero or more args followed by comma
-        repeat(prec.right(
-          seq(
-            $.create_instance,
-            ",",
-            $.optional_newlines,
-          )
-        )),
-
-        // for last arg separate it out so comma can
-        // be optional
-        optional(
-          seq(
-            $.create_instance,
-            optional(","),
-            $.optional_newlines,
-          )
-        ),
+      optional(seq(
+        $.create_instance,
+        repeat(seq(",", $.create_instance)),
+        optional(","),
+      )),
       ")",
     ),
 
     // e.g. A : T = B or A := B
     create_instance: $ => choice(
-      seq($.pattern_and_type, optional(seq("=", $.expr))),
-      seq($.pattern, ":=", $.expr),
+      seq($.pattern_and_type, optional(seq("=", $._expr))),
+      seq($.pattern, ":=", $._expr),
     ),
 
     pattern_and_type: $ => seq(
@@ -81,7 +94,7 @@ module.exports = grammar({
       field("type", $.type),
     ),
 
-    expr: $ => choice(
+    _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
       $.binary_expr,
@@ -92,7 +105,7 @@ module.exports = grammar({
       $.identifier_w_namespace,
       $.float_literal,
       $.integer_literal,
-      seq("(", $.expr, ")"),
+      seq("(", $._expr, ")"),
     ),
 
     unary_expr: $ => choice(
@@ -102,7 +115,7 @@ module.exports = grammar({
           "not",
           "~",
         )),
-        field("subExpr", $.expr),
+        field("subExpr", $._expr),
       )),
     ),
 
@@ -131,45 +144,78 @@ module.exports = grammar({
       )),
     ),
 
-    postfix_expr: $ => prec.left(11, seq(
-      field("lhs", $.expr),
-      choice(
-        seq(".", $.identifier), // member access
-        seq("[", $.expr, "]"), // array access
-        $.function_call_args,
-      )
+    postfix_expr: $ => prec.left(11, choice(
+      $.array_access_expr,
+      $.member_access_expr,
+      $.function_call_expr,
     )),
 
-    function_call_args: $ => seq(
+    array_access_expr: $ => seq(
+      field("lhs", $._expr),
+      seq("[", $._expr, "]"), // array access
+    ),
+
+    member_access_expr: $ => seq(
+      field("lhs", $._expr),
+      seq(".", $.identifier), // member access
+    ),
+
+    function_call_expr: $ => seq(
+      field("lhs", $._expr),
+      $.function_call_parameters,
+    ),
+
+    function_call_parameters: $ => seq(
       "(",
-      seq(
-        // parser will not enforce args before kwargs,
-        // that wil come later in processing
-        repeat(prec.right(seq($.arg_or_kwarg, ","))),
-        optional(seq($.arg_or_kwarg, optional(","))),
-      ),
+      optional(seq(
+        $.arg_or_kwarg,
+        repeat(seq(",", $.arg_or_kwarg)),
+        optional(","),
+      )),
       ")",
     ),
 
     arg_or_kwarg: $ => choice(
-      $.expr,
+      $._expr,
       $.kwarg,
     ),
 
-    kwarg: $ => seq($.pattern, "=", $.expr),
+    kwarg: $ => seq($.pattern, "=", $._expr),
 
     type: $ => choice(
       $.identifier_w_namespace,
     ),
 
     _statement: $ => choice(
-      $.create_instance,
+      $.create_instance_statement,
+      $.modify_instance_statement,
+      $.function_call_statement,
       $.inc_dec_statement,
     ),
 
+    create_instance_statement: $ => seq(
+      $.create_instance,
+      NEWLINE(),
+    ),
+
+    modify_instance_statement: $ => seq(
+      $.pattern,
+      choice(
+        "=",
+      ),
+      $._expr,
+      NEWLINE(),
+    ),
+
+    function_call_statement: $ => seq(
+      $.function_call_expr,
+      NEWLINE(),
+    ),
+
     inc_dec_statement: $ => seq(
-      $.identifier,
+      $.identifier_w_namespace,
       choice("++", "--"),
+      NEWLINE(),
     ),
 
     pattern: $ => choice (
@@ -178,14 +224,26 @@ module.exports = grammar({
 
     identifier_w_namespace: $ => seq(
       // 0+ namespaces first
-      repeat(
+      field("namespaces", repeat(
         seq($.identifier, "::"),
-      ),
+      )),
+
       // identifier itself
-      $.identifier,
+      field("name", $.identifier),
+
+      // optional template params
+      optional(seq(
+        "::",
+        field("templateParams", $.template_instantiation_parameters),
+      )),
     ),
 
-    optional_newlines: $ => token(repeat(LINE_SEP)),
+    template_instantiation_parameters: $ => seq(
+      "<",
+      repeat(seq($.arg_or_kwarg, ",")),
+      optional(seq($.arg_or_kwarg)),
+      ">",
+    ),
 
     identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
 
