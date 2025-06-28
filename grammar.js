@@ -7,32 +7,32 @@
 /// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
 
-const B_EXPR = function($, prec_no, operators) {
-  let middle_arg;
-  
-  if (typeof operators === "string") {
-    middle_arg = operators;
+const GET_STR_OR_CHOICE = function(str_or_arr) {
+  if (typeof str_or_arr === "string") {
+    return str_or_arr;
   }
-  else if (Array.isArray(operators) &&
-    operators.every(element => typeof element === "string")) {
+  else if (Array.isArray(str_or_arr) &&
+    str_or_arr.every(element => typeof element === "string")) {
     
-    if (operators.length === 0) {
+    if (str_or_arr.length === 0) {
       throw new Error("length of array should be > 0");
     }
-    else if (operators.length === 1) {
-      middle_arg = operators[0];
+    else if (str_or_arr.length === 1) {
+      return str_or_arr[0];
     }
     else {
-      middle_arg = choice(...operators,);
+      return choice(...str_or_arr,);
     }
   }
   else {
     throw new Error("provide string or array of strings for operators");
   }
+};
 
+const B_EXPR = function($, prec_no, operators) {
   return prec.left(prec_no, seq(
     field("lhs", $._expr),
-    field("op", middle_arg),
+    field("op", GET_STR_OR_CHOICE(operators)),
     field("rhs", $._expr),
   ));
 };
@@ -61,13 +61,39 @@ const PARAMS = function($, repeated) {
   ));
 }
 
-const REPEAT_STATEMENT = function($) {
+const REPEAT_W_NEWLINES = function($, repeated) {
   return seq(
     MAYBE_NEWLINES($),
     repeat(seq(
-      $._statement,
+      repeated,
       MAYBE_NEWLINES($),
     )),
+  );
+};
+
+const REPEAT_STATEMENT = function($) {
+  return REPEAT_W_NEWLINES($, $._statement);
+}
+
+const REPEAT_DEFINITION = function($) {
+  return REPEAT_W_NEWLINES($, $.definition);
+}
+
+const START_TYPEDEF = function($, start_options) {
+  return seq(
+    GET_STR_OR_CHOICE(start_options),
+    field("name", $.identifier),
+    NEWLINE($),
+
+    optional($.attributes),
+  );
+}
+
+const END_TYPEDEF = function($) {
+  return seq(
+    "end",
+    field("endName", $.identifier),
+    NEWLINE($),
   );
 }
 
@@ -120,22 +146,54 @@ module.exports = grammar({
     ),
 
     _type_definition: $ => choice(
+      $.class_definition,
+      $.enum_definition,
       $.number_definition,
     ),
 
+    class_definition: $ => seq(
+      START_TYPEDEF($, ["struct", "class"]),
+
+      // members are another definition (e.g. of a type or function)
+      // or create instance (regular or static member)
+      field("members", REPEAT_W_NEWLINES($, choice(
+        seq($.create_instance, NEWLINE($)),
+        $._definition,
+      ))),
+
+      END_TYPEDEF($),
+    ),
+
+    enum_definition: $ => seq(
+      START_TYPEDEF($, "enum"),
+
+      field("definitions", REPEAT_DEFINITION($)),
+
+      END_TYPEDEF($),
+    ),
+
     number_definition: $ => seq(
-      choice(
-        "signed",
-        "unsigned",
-        "float",
-      ),
-      field("name", $.identifier),
+      START_TYPEDEF($, ["signed", "unsigned", "float"]),
+
+      field("definitions", REPEAT_DEFINITION($)),
+      
+      END_TYPEDEF($),
+    ),
+
+    attributes: $ => seq(
+      "attributes",
       NEWLINE($),
 
-      field("definitions", repeat($._definition)),
-      
+      // set attributes to desired values
+      field("attributeValues", REPEAT_W_NEWLINES($, seq(
+        $.pattern,
+        "=",
+        $._expr,
+        NEWLINE($),
+      ))),
+
       "end",
-      field("endName", $.identifier),
+      "attributes",
       NEWLINE($),
     ),
 
