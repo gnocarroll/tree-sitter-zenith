@@ -7,11 +7,35 @@
 /// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
 
-const B_EXPR = ($, prec_no, operator) => prec.left(prec_no, seq(
-  field("lhs", $._expr),
-  field("op", operator),
-  field("rhs", $._expr),
-));
+const B_EXPR = function($, prec_no, operators) {
+  let middle_arg;
+  
+  if (typeof operators === "string") {
+    middle_arg = operators;
+  }
+  else if (Array.isArray(operators) &&
+    operators.every(element => typeof element === "string")) {
+    
+    if (operators.length === 0) {
+      throw new Error("length of array should be > 0");
+    }
+    else if (operators.length === 1) {
+      middle_arg = operators[0];
+    }
+    else {
+      middle_arg = choice(...operators,);
+    }
+  }
+  else {
+    throw new Error("provide string or array of strings for operators");
+  }
+
+  return prec.left(prec_no, seq(
+    field("lhs", $._expr),
+    field("op", middle_arg),
+    field("rhs", $._expr),
+  ));
+};
 
 const NEWLINE = function($) {
   return choice("\n", $.eof_tok);
@@ -37,13 +61,40 @@ const PARAMS = function($, repeated) {
   ));
 }
 
+const BOOL_BINARY_OPS = [
+  ["or"],
+  ["and"],
+  ["==", "!="],
+  ["<", "<=", ">", ">="],
+]
+
+const NUM_BINARY_OPS = [
+  ["|"],
+  ["^"],
+  ["&"],
+  ["+", "-"],
+  ["*", "/", "%"],
+  ["**"],
+];
+
+const UNARY_OPS = [
+  "+",
+  "-",
+  "not",
+  "~",
+];
+
+const MIN_NUM_BINARY_PREC = BOOL_BINARY_OPS.length + 1
+const UNARY_PREC = MIN_NUM_BINARY_PREC + NUM_BINARY_OPS.length
+const POSTFIX_PREC = UNARY_PREC + 1
+
 module.exports = grammar({
   name: "zenith",
 
   externals: $ => [$.eof_tok],
 
   extras: $ => [
-    /\\\s*\n/, // escaped newline
+    /\\[ \t\r\f\v]*\n/, // escaped newline
     /[ \t\r\f\v]/, // whitespace excluding newline
   ],
 
@@ -131,46 +182,31 @@ module.exports = grammar({
     ),
 
     unary_expr: $ => choice(
-      prec.right(10,seq(
+      prec.right(UNARY_PREC, seq(
         field("op", choice(
-          "+", "-",
-          "not",
-          "~",
+          ...UNARY_OPS,
         )),
         field("subExpr", $._expr),
       )),
     ),
 
     binary_expr: $ => choice(
-      // logical or, and
-      B_EXPR($, 1, "or"),
-      B_EXPR($, 2, "and"),
-      
-      // comparison operators
-      B_EXPR($, 3, choice("==", "!=")),
-      B_EXPR($, 4, choice(
-        "<", "<=", ">", ">="
-      )),
-
-      // bitwise binary operators
-      B_EXPR($, 5, "|"),
-      B_EXPR($, 6, "^"),
-      B_EXPR($, 7, "&"),
-
-      // addition and subtraction, then mult/div/mod
-      B_EXPR($, 8, choice(
-        "+", "-",
-      )),
-      B_EXPR($, 9, choice(
-        "*", "/", "%",
-      )),
+      ...(BOOL_BINARY_OPS.map((op, idx) => B_EXPR($, 1 + idx, op))),
+      ...(NUM_BINARY_OPS.map((op, idx) => B_EXPR(
+        $,
+        MIN_NUM_BINARY_PREC + idx,
+        op,
+      ))),
     ),
 
-    postfix_expr: $ => prec.left(11, choice(
-      $.array_access_expr,
-      $.member_access_expr,
-      $.function_call_expr,
-    )),
+    postfix_expr: $ => prec.left(
+      POSTFIX_PREC,
+      choice(
+        $.array_access_expr,
+        $.member_access_expr,
+        $.function_call_expr,
+      ),
+    ),
 
     array_access_expr: $ => seq(
       field("lhs", $._expr),
@@ -223,6 +259,7 @@ module.exports = grammar({
       $.pattern,
       choice(
         "=",
+        ...(NUM_BINARY_OPS.flat().map(op => (op + "="))),
       ),
       $._expr,
       NEWLINE($),
