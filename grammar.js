@@ -13,13 +13,39 @@ const B_EXPR = ($, prec_no, operator) => prec.left(prec_no, seq(
   field("rhs", $._expr),
 ));
 
+const NEWLINE = function($) {
+  return choice("\n", $.eof_tok);
+}
 
-// only insert newline where you want to enforce its presence,
-// otherwise tree-sitter will disregard any whitespace
-const NEWLINE = () => "\n";
+const MAYBE_NEWLINES = function($) {
+  return repeat(NEWLINE($));
+}
+
+const PARAMS = function($, repeated) {
+  return seq(
+    MAYBE_NEWLINES($),
+    optional(seq(
+      repeated,
+      repeat(seq(
+        ",",
+        MAYBE_NEWLINES($),
+        repeated,
+      )),
+      optional(","),
+      MAYBE_NEWLINES($),
+    ),
+  ));
+}
 
 module.exports = grammar({
   name: "zenith",
+
+  externals: $ => [$.eof_tok],
+
+  extras: $ => [
+    /\\\s*\n/, // escaped newline
+    /[ \t\r\f\v]/, // whitespace excluding newline
+  ],
 
   word: $ => $.identifier,
 
@@ -43,13 +69,13 @@ module.exports = grammar({
         "float",
       ),
       field("name", $.identifier),
-      NEWLINE(),
+      NEWLINE($),
 
       field("definitions", repeat($._definition)),
       
       "end",
       field("endName", $.identifier),
-      NEWLINE(),
+      NEWLINE($),
     ),
 
     function_definition: $ => seq(
@@ -63,22 +89,18 @@ module.exports = grammar({
           $.pattern_and_type,
         )),
       )),
-      NEWLINE(),
+      NEWLINE($),
       
       repeat($._statement),
       
       "end",
       field("endName", $.identifier),
-      NEWLINE(),
+      NEWLINE($),
     ),
 
     function_definition_parameters: $ => seq(
       "(",
-      optional(seq(
-        $.create_instance,
-        repeat(seq(",", $.create_instance)),
-        optional(","),
-      )),
+      PARAMS($, $.create_instance),
       ")",
     ),
 
@@ -167,11 +189,7 @@ module.exports = grammar({
 
     function_call_parameters: $ => seq(
       "(",
-      optional(seq(
-        $.arg_or_kwarg,
-        repeat(seq(",", $.arg_or_kwarg)),
-        optional(","),
-      )),
+      PARAMS($, $.arg_or_kwarg),
       ")",
     ),
 
@@ -195,7 +213,7 @@ module.exports = grammar({
 
     create_instance_statement: $ => seq(
       $.create_instance,
-      NEWLINE(),
+      NEWLINE($),
     ),
 
     modify_instance_statement: $ => seq(
@@ -204,18 +222,18 @@ module.exports = grammar({
         "=",
       ),
       $._expr,
-      NEWLINE(),
+      NEWLINE($),
     ),
 
     function_call_statement: $ => seq(
       $.function_call_expr,
-      NEWLINE(),
+      NEWLINE($),
     ),
 
     inc_dec_statement: $ => seq(
       $.identifier_w_namespace,
       choice("++", "--"),
-      NEWLINE(),
+      NEWLINE($),
     ),
 
     pattern: $ => choice (
@@ -240,8 +258,7 @@ module.exports = grammar({
 
     template_instantiation_parameters: $ => seq(
       "<",
-      repeat(seq($.arg_or_kwarg, ",")),
-      optional(seq($.arg_or_kwarg)),
+      PARAMS($, $.arg_or_kwarg),
       ">",
     ),
 
