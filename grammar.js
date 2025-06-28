@@ -204,11 +204,14 @@ module.exports = grammar({
       $.identifier_w_namespace,
     ),
 
-    _statement: $ => choice(
-      $.create_instance_statement,
-      $.modify_instance_statement,
-      $.function_call_statement,
-      $.inc_dec_statement,
+    _statement: $ => seq(
+      choice(
+        $.create_instance_statement,
+        $.modify_instance_statement,
+        $.function_call_statement,
+        $.inc_dec_statement,
+      ),
+      MAYBE_NEWLINES($), // may have additional newlines following statement
     ),
 
     create_instance_statement: $ => seq(
