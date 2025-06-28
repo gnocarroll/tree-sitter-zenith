@@ -61,6 +61,16 @@ const PARAMS = function($, repeated) {
   ));
 }
 
+const REPEAT_STATEMENT = function($) {
+  return seq(
+    MAYBE_NEWLINES($),
+    repeat(seq(
+      $._statement,
+      MAYBE_NEWLINES($),
+    )),
+  );
+}
+
 const BOOL_BINARY_OPS = [
   ["or"],
   ["and"],
@@ -133,16 +143,10 @@ module.exports = grammar({
       "function",
       field("name", $.identifier),
       field("params", $.function_definition_parameters),
-      optional(seq( // return type (can give var name)
-        "=>",
-        field("returnSpec", choice(
-          $.type,
-          $.pattern_and_type,
-        )),
-      )),
+      optional($.function_return_spec),
       NEWLINE($),
       
-      repeat($._statement),
+      field("body", REPEAT_STATEMENT($)),
       
       "end",
       field("endName", $.identifier),
@@ -153,6 +157,14 @@ module.exports = grammar({
       "(",
       PARAMS($, $.create_instance),
       ")",
+    ),
+
+    function_return_spec: $ => seq( // return type (can give var name)
+      "=>",
+      field("returnSpec", choice(
+        $.type,
+        $.pattern_and_type,
+      )),
     ),
 
     // e.g. A : T = B or A := B
@@ -176,9 +188,32 @@ module.exports = grammar({
 
     primary_expr: $ => choice(
       $.identifier_w_namespace,
+      $.simple_literal,
+      seq("(", $._expr, ")"),
+      $.function_literal,
+    ),
+
+    simple_literal: $ => choice(
       $.float_literal,
       $.integer_literal,
-      seq("(", $._expr, ")"),
+      $.bool_literal,
+    ),
+
+    function_literal: $ => seq(
+      "function",
+      field("params", $.function_definition_parameters),
+      optional($.function_return_spec),
+      NEWLINE($),
+
+      field("body", REPEAT_STATEMENT($)),
+
+      "end",
+      "function", // may not have newline immediately after
+    ),
+
+    bool_literal: $ => choice(
+      "true",
+      "false",
     ),
 
     unary_expr: $ => choice(
@@ -240,14 +275,13 @@ module.exports = grammar({
       $.identifier_w_namespace,
     ),
 
-    _statement: $ => seq(
-      choice(
-        $.create_instance_statement,
-        $.modify_instance_statement,
-        $.function_call_statement,
-        $.inc_dec_statement,
-      ),
-      MAYBE_NEWLINES($), // may have additional newlines following statement
+    _statement: $ => choice(
+      $.create_instance_statement,
+      $.modify_instance_statement,
+      $.function_call_statement,
+      $.inc_dec_statement,
+      $.if_statement,
+      $.while_statement,
     ),
 
     create_instance_statement: $ => seq(
@@ -273,6 +307,62 @@ module.exports = grammar({
     inc_dec_statement: $ => seq(
       $.identifier_w_namespace,
       choice("++", "--"),
+      NEWLINE($),
+    ),
+
+    if_statement: $ => seq(
+      "if",
+      field("condition", $._expr),
+      NEWLINE($),
+
+      field("ifBody", REPEAT_STATEMENT($)),
+      
+      // maybe some else ifs
+      repeat(seq(
+        "else",
+        "if",
+        field("elseIfCondition", $._expr),
+        NEWLINE($),
+
+        field("elseIfBody", REPEAT_STATEMENT($)),
+      )),
+
+      // else block
+      optional(seq(
+        "else",
+        NEWLINE($),
+
+        field("elseBody", REPEAT_STATEMENT($)),
+      )),
+
+      "end",
+      "if",
+      NEWLINE($),
+    ),
+
+    while_statement: $ => seq(
+      "while",
+      field("condition", $._expr),
+      NEWLINE($),
+
+      field("body", REPEAT_STATEMENT($)),
+
+      "end",
+      "while",
+      NEWLINE($),
+    ),
+
+    for_statement: $ => seq(
+      "for",
+      $.pattern,
+      "in",
+      $._expr,
+      NEWLINE($),
+
+      REPEAT_STATEMENT($),
+
+      "end",
+      "for",
       NEWLINE($),
     ),
 
