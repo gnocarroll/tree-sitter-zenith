@@ -76,13 +76,22 @@ const REPEAT_STATEMENT = function($) {
 }
 
 const REPEAT_DEFINITION = function($) {
-  return REPEAT_W_NEWLINES($, $.definition);
+  return REPEAT_W_NEWLINES($, $._definition);
+}
+
+const FIELD_TEMPLATE_PARAMS = function($) {
+  return optional(
+    field("templateParams", $.template_parameters),
+  );
 }
 
 const START_TYPEDEF = function($, start_options) {
   return seq(
     GET_STR_OR_CHOICE(start_options),
     field("name", $.identifier),
+    
+    FIELD_TEMPLATE_PARAMS($),
+
     NEWLINE($),
 
     optional($.attributes),
@@ -136,9 +145,11 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
+  conflicts: $ => [[$.attributes, $.enum_definition]],
+
   rules: {
     // TODO: add the actual grammar rules
-    source_file: $ => repeat($._definition),
+    source_file: $ => REPEAT_DEFINITION($),
 
     _definition: $ => choice(
       $.function_definition,
@@ -149,23 +160,60 @@ module.exports = grammar({
       $.class_definition,
       $.enum_definition,
       $.number_definition,
+      $.variant_definition,
     ),
 
     class_definition: $ => seq(
-      START_TYPEDEF($, ["struct", "class"]),
+      START_TYPEDEF($, ["class", "struct", "union"]),
 
-      // members are another definition (e.g. of a type or function)
-      // or create instance (regular or static member)
-      field("members", REPEAT_W_NEWLINES($, choice(
-        seq($.create_instance, NEWLINE($)),
-        $._definition,
+      field("fields", REPEAT_W_NEWLINES($, seq(
+        $.create_instance,
+        NEWLINE($),
       ))),
+
+      "end",
+      "fields",
+      NEWLINE($),
+
+      field("definitions", REPEAT_DEFINITION($)),
 
       END_TYPEDEF($),
     ),
 
     enum_definition: $ => seq(
       START_TYPEDEF($, "enum"),
+
+      field("elements", REPEAT_W_NEWLINES($, seq(
+        choice(
+          $.identifier,
+          seq($.pattern, "=", $._expr),
+        ),
+        NEWLINE($),
+      ))),
+
+      "end",
+      "elements",
+      NEWLINE($),
+
+      field("definitions", REPEAT_DEFINITION($)),
+
+      END_TYPEDEF($),
+    ),
+
+    variant_definition: $ => seq(
+      START_TYPEDEF($, "variant"),
+
+      field("elements", REPEAT_W_NEWLINES($, seq(
+        choice(
+          $.identifier,
+          $.create_instance,
+        ),
+        NEWLINE($),
+      ))),
+
+      "end",
+      "elements",
+      NEWLINE($),
 
       field("definitions", REPEAT_DEFINITION($)),
 
@@ -181,9 +229,6 @@ module.exports = grammar({
     ),
 
     attributes: $ => seq(
-      "attributes",
-      NEWLINE($),
-
       // set attributes to desired values
       field("attributeValues", REPEAT_W_NEWLINES($, seq(
         $.pattern,
@@ -200,21 +245,39 @@ module.exports = grammar({
     function_definition: $ => seq(
       "function",
       field("name", $.identifier),
-      field("params", $.function_definition_parameters),
-      optional($.function_return_spec),
-      NEWLINE($),
       
-      field("body", REPEAT_STATEMENT($)),
+      $.function_params_and_body,
       
       "end",
       field("endName", $.identifier),
       NEWLINE($),
     ),
 
+    function_params_and_body: $ => seq(
+      FIELD_TEMPLATE_PARAMS($),
+      field("params", $.function_definition_parameters),
+      optional($.function_return_spec),
+      NEWLINE($),
+      
+      field("body", REPEAT_STATEMENT($)),
+    ),
+
     function_definition_parameters: $ => seq(
       "(",
       PARAMS($, $.create_instance),
       ")",
+    ),
+
+    template_parameters: $ => seq(
+      "<",
+      PARAMS($, choice(
+        $.create_instance,
+        seq(
+          $.identifier,
+          optional(seq("=", $.identifier)),
+        ),
+      )),
+      ">",
     ),
 
     function_return_spec: $ => seq( // return type (can give var name)
@@ -259,11 +322,8 @@ module.exports = grammar({
 
     function_literal: $ => seq(
       "function",
-      field("params", $.function_definition_parameters),
-      optional($.function_return_spec),
-      NEWLINE($),
-
-      field("body", REPEAT_STATEMENT($)),
+      
+      $.function_params_and_body,
 
       "end",
       "function", // may not have newline immediately after
@@ -454,5 +514,5 @@ module.exports = grammar({
 
     float_literal: $ => /(\d+\.\d*|\d*\.\d+)([Ee]\d+)?/,
     integer_literal: $ => /\d+/,
-  }
+  },
 });
